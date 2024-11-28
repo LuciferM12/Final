@@ -3,14 +3,20 @@ import { FaSun, FaMoon } from "react-icons/fa6"
 import LineNumberedInput from './components/LineNumberedInput'
 import { Lexer, EmbeddedActionsParser, createToken } from 'chevrotain'
 
-const Number = createToken({ name: "Number", pattern: /\d+/, line_breaks: true, })
+const Number = createToken({ name: "Number", pattern: /\d+(\.\d+)?/, line_breaks: true, })
 const Plus = createToken({ name: "Plus", pattern: /\+/ })
 const Minus = createToken({ name: "Minus", pattern: /-/ })
 const Multiply = createToken({ name: "Multiply", pattern: /\*/ })
 const Divide = createToken({ name: "Divide", pattern: /\// })
 const LParen = createToken({ name: "LParen", pattern: /\(/ })
 const RParen = createToken({ name: "RParen", pattern: /\)/, line_breaks: true, })
-const tokens = [Number, Plus, Minus, Multiply, Divide, LParen, RParen]
+const WhiteSpace = createToken({
+  name: "WhiteSpace",
+  pattern: /\s+/,
+  group: Lexer.SKIPPED
+})
+
+const tokens = [WhiteSpace, Number, Plus, Minus, Multiply, Divide, LParen, RParen]
 const lexer = new Lexer(tokens)
 
 class CalcularParser extends EmbeddedActionsParser {
@@ -57,8 +63,15 @@ class CalcularParser extends EmbeddedActionsParser {
 
     $.RULE("expresionAtomica", () => {
       return $.OR([
-        { ALT: () => parseInt($.CONSUME(Number).image, 10) },
-        { ALT: () => $.SUBRULE($.expresionParentesis) },
+        {
+          ALT: () => {
+            const esNegativo = $.OPTION(() => $.CONSUME(Minus)) // Detecta el signo negativo
+            const numberToken = $.CONSUME(Number) // Consume el número flotante o entero
+            const value = parseFloat(numberToken.image) // Convierte el token a un número flotante
+            return esNegativo ? -value : value // Devuelve el valor con el signo correcto
+          }
+        },
+        { ALT: () => $.SUBRULE($.expresionParentesis) }, // Maneja expresiones entre paréntesis
       ])
     })
 
@@ -78,7 +91,7 @@ const parserInstance = new CalcularParser()
 function App() {
   const [darkMode, setDarkMode] = useState(true)
   const [code, setCode] = useState('')
-  const [result, setResult] = useState(null)
+  const [result, setResult] = useState('')
   const [tokens, setTokens] = useState([])
 
   useEffect(() => {
@@ -86,15 +99,44 @@ function App() {
   }, [darkMode])
 
   const handleCompile = () => {
-    const resultadoLexico = lexer.tokenize(code)
-    setTokens(resultadoLexico.tokens.map((token) => token.image))
-
-    parserInstance.input = resultadoLexico.tokens
-    const astResult = parserInstance.expresion()
-    
-    // Ejecución del código 
-    setResult(evaluate(astResult))
+    setResult('') // Limpia la consola
+    try {
+      const lines = code.split("\n") // Divide el código en líneas
+      
+      for (let index = 0; index < lines.length; index++) {
+        const line = lines[index].trim() // Obtiene la línea actual
+        if (!line) continue // Ignora líneas vacías
+  
+        try {
+          // Tokeniza la línea
+          const resultadoLexico = lexer.tokenize(line)
+  
+          if (resultadoLexico.errors.length > 0) {
+            throw new Error(`Error léxico en línea ${index + 1}: ${resultadoLexico.errors[0].message}`)
+          }
+  
+          // Genera el AST para la línea
+          parserInstance.input = resultadoLexico.tokens
+          const astResult = parserInstance.expresion()
+  
+          if (parserInstance.errors.length > 0) {
+            throw new Error(`Error sintáctico en línea ${index + 1}: ${parserInstance.errors[0].message}`)
+          }
+  
+          // Evalúa el AST y almacena el resultado
+          const evaluationResult = evaluate(astResult)
+          setResult((prevResult) => prevResult + `Línea ${index + 1}: Resultado = ${evaluationResult}\n`)
+        } catch (error) {
+          // Lanza el error y detiene la ejecución
+          throw new Error(`Línea ${index + 1}: ${error.message}`)
+        }
+      }
+    } catch (error) {
+      // Muestra el error y detiene todo
+      setResult(error.message)
+    }
   }
+
 
   const evaluate = (node) => {
     if (typeof node === "number") return node;
@@ -108,9 +150,10 @@ function App() {
       case "Multiply":
         return left * right
       case "Divide":
+        if (right === 0) throw new Error("Error: División por cero")
         return left / right
       default:
-        return null
+        throw new Error(`Operación desconocida: ${node.type}`)
     }
   }
 
@@ -131,16 +174,19 @@ function App() {
         </div>
         <div className='w-full px-12'>
           <h2 className='pb-3'>Consola</h2>
-          <textarea
-            className='outline-none resize-none w-full rounded-md dark:bg-gray-700 h-24 p-3 '
-            disabled
-            value={result || ''}
-          />
+          <div className='border-gray-950 dark:border-gray-300 border rounded-md h-48 mb-3 overflow-y-scroll'>
+            <ul className='p-3'>
+              {result.split("\n").map((line, index) => (
+                <li key={index} className='text-sm'>
+                  {line}
+                </li>
+              ))}
+            </ul>
+          </div>
         </div>
-        <button onClick={handleCompile} className='p-2 cursor-pointer bg-slate-500 rounded '>
+        <button onClick={handleCompile} className='p-2 cursor-pointer bg-slate-500 rounded'>
           Compilar
         </button>
-
       </div>
     </div>
   )
