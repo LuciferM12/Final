@@ -44,8 +44,8 @@ export default function LineNumberedInput() {
   }, [text])
 
   return (
-    <div className="flex border border-gray-300 rounded-md overflow-hidden">
-      <div className="bg-gray-100 p-2 text-right text-gray-500 select-none">
+    <div className="flex border border-gray-950 dark:border-gray-300 rounded-md overflow-hidden h-96">
+      <div className="dark:bg-gray-900 bg-gray-100 p-2 text-right dark:text-gray-300 text-gray-500 select-none">
         {lines.map((line, index) => (
           <div key={index}>{line}</div>
         ))}
@@ -55,7 +55,7 @@ export default function LineNumberedInput() {
         value={text}
         onChange={handleTextChange}
         onKeyDown={handleKeyDown}
-        className="flex-grow text-black p-2 outline-none resize-none overflow-hidden"
+        className="flex-grow dark:bg-gray-700 p-2 outline-none resize-none overflow-hidden"
         rows={lines.length}
         style={{ minHeight: '100px' }}
       />

@@ -21,7 +21,17 @@ function App() {
       </button>
       <div className='h-full w-full justify-center items-center flex flex-col gap-2'>
         <h1 className='text-2xl font-bold'>Compilador en linea</h1>
-        <LineNumberedInput />
+        <div className='w-full px-12 py-4'>
+          <LineNumberedInput />
+        </div>
+        <div className='w-full px-12'>
+          <h2 className='pb-3'>Consola</h2>
+          <textarea
+            className='outline-none resize-none w-full rounded-md dark:bg-gray-700 h-24 p-3 '
+            disabled
+          />
+        </div>
+
       </div>
     </div>
   )
