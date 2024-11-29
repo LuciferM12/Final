@@ -6,6 +6,7 @@ import { Lexer, EmbeddedActionsParser, createToken } from 'chevrotain'
 const Pinta = createToken({ name: "Pinta", pattern: /pinta/ })
 const Let = createToken({ name: "Let", pattern: /let/ })
 const Identifier = createToken({ name: "Identifier", pattern: /[a-zA-Z]\w*/, longer_alt: Pinta })
+const While = createToken({ name: "While", pattern: /while/, longer_alt: Identifier });
 const Number = createToken({ name: "Number", pattern: /\d+(\.\d+)?/, line_breaks: true })
 const Plus = createToken({ name: "Plus", pattern: /\+/ })
 const Minus = createToken({ name: "Minus", pattern: /-/ })
@@ -23,6 +24,7 @@ const GreaterThan = createToken({ name: "GreaterThan", pattern: />/ })
 const LBrace = createToken({ name: "LBrace", pattern: /{/ })
 const RBrace = createToken({ name: "RBrace", pattern: /}/ })
 const Semicolon = createToken({ name: "Semicolon", pattern: /;/ })
+
 const WhiteSpace = createToken({
   name: "WhiteSpace",
   pattern: /\s+/,
@@ -31,8 +33,8 @@ const WhiteSpace = createToken({
 
 const tokens = [
   WhiteSpace, Number, Plus, Minus, Multiply, Divide, LParen, RParen,
-  If, Then, Else, Pinta, Let, Identifier, Equals, Assign, LessThan, GreaterThan,
-  LBrace, RBrace, Semicolon
+  If, Then, Else, Pinta, Let, While, Identifier, Equals, Assign, LessThan, GreaterThan,
+  LBrace, RBrace, Semicolon,
 ]
 const lexer = new Lexer(tokens)
 
@@ -53,6 +55,7 @@ class CalcularParser extends EmbeddedActionsParser {
     $.RULE("statement", () => {
       return $.OR([
         { ALT: () => $.SUBRULE($.ifStatement) },
+        { ALT: () => $.SUBRULE($.whileStatement) },
         { ALT: () => $.SUBRULE($.expressionStatement) },
         { ALT: () => $.SUBRULE($.pintaStatement) },
         { ALT: () => $.SUBRULE($.variableDeclaration) }
@@ -69,6 +72,13 @@ class CalcularParser extends EmbeddedActionsParser {
         return $.SUBRULE2($.block)
       })
       return { type: "If", condition, thenBlock, elseBlock }
+    })
+
+    $.RULE("whileStatement", () => {
+      $.CONSUME(While)
+      const condition = $.SUBRULE($.comparacion)
+      const body = $.SUBRULE($.block)
+      return { type: "While", condition, body }
     })
 
     $.RULE("block", () => {
@@ -251,6 +261,18 @@ function App() {
       case "Pinta":
         const value = evaluateExpression(node.expression, context);
         return [`${value}`];
+      case "While":
+        const results = [];
+        let iterationCount = 0;
+        const maxIterations = 1000; 
+        while (evaluateExpression(node.condition, context)) {
+          results.push(...evaluate(node.body, context));
+          iterationCount++;
+          if (iterationCount > maxIterations) {
+            throw new Error("Error: bucle infinito detectado.");
+          }
+        }
+        return results;
       default:
         return [];
     }
