@@ -4,6 +4,7 @@ import LineNumberedInput from './components/LineNumberedInput'
 import { Lexer, EmbeddedActionsParser, createToken } from 'chevrotain'
 
 const Pinta = createToken({ name: "Pinta", pattern: /pinta/ })
+const Let = createToken({ name: "Let", pattern: /let/ })
 const Identifier = createToken({ name: "Identifier", pattern: /[a-zA-Z]\w*/, longer_alt: Pinta })
 const Number = createToken({ name: "Number", pattern: /\d+(\.\d+)?/, line_breaks: true })
 const Plus = createToken({ name: "Plus", pattern: /\+/ })
@@ -12,10 +13,11 @@ const Multiply = createToken({ name: "Multiply", pattern: /\*/ })
 const Divide = createToken({ name: "Divide", pattern: /\// })
 const LParen = createToken({ name: "LParen", pattern: /\(/ })
 const RParen = createToken({ name: "RParen", pattern: /\)/ })
-const If = createToken({ name: "If", pattern: /if/, longer_alt: Identifier })
-const Then = createToken({ name: "Then", pattern: /then/, longer_alt: Identifier })
-const Else = createToken({ name: "Else", pattern: /else/, longer_alt: Identifier })
+const If = createToken({ name: "If", pattern: /IF/, longer_alt: Identifier })
+const Then = createToken({ name: "Then", pattern: /THEN/, longer_alt: Identifier })
+const Else = createToken({ name: "Else", pattern: /ELSE/, longer_alt: Identifier })
 const Equals = createToken({ name: "Equals", pattern: /==/ })
+const Assign = createToken({ name: "Assign", pattern: /=/ })
 const LessThan = createToken({ name: "LessThan", pattern: /</ })
 const GreaterThan = createToken({ name: "GreaterThan", pattern: />/ })
 const LBrace = createToken({ name: "LBrace", pattern: /{/ })
@@ -29,7 +31,7 @@ const WhiteSpace = createToken({
 
 const tokens = [
   WhiteSpace, Number, Plus, Minus, Multiply, Divide, LParen, RParen,
-  If, Then, Else, Pinta, Identifier, Equals, LessThan, GreaterThan,
+  If, Then, Else, Pinta, Let, Identifier, Equals, Assign, LessThan, GreaterThan,
   LBrace, RBrace, Semicolon
 ]
 const lexer = new Lexer(tokens)
@@ -52,7 +54,8 @@ class CalcularParser extends EmbeddedActionsParser {
       return $.OR([
         { ALT: () => $.SUBRULE($.ifStatement) },
         { ALT: () => $.SUBRULE($.expressionStatement) },
-        { ALT: () => $.SUBRULE($.pintaStatement) }
+        { ALT: () => $.SUBRULE($.pintaStatement) },
+        { ALT: () => $.SUBRULE($.variableDeclaration) }
       ])
     })
 
@@ -104,8 +107,27 @@ class CalcularParser extends EmbeddedActionsParser {
       return { type: "Pinta", expression: expr }
     })
 
+    $.RULE("variableDeclaration", () => {
+      $.CONSUME(Let)
+      const name = $.CONSUME(Identifier).image
+      $.CONSUME(Assign)
+      const initialValue = $.SUBRULE($.expresion)
+      $.CONSUME(Semicolon)
+      return { type: "VariableDeclaration", name, initialValue }
+    })
+
     $.RULE("expresion", () => {
-      return $.SUBRULE($.expresionAdicion)
+      return $.SUBRULE($.expresionAsignacion)
+    })
+
+    $.RULE("expresionAsignacion", () => {
+      let left = $.SUBRULE($.expresionAdicion)
+      $.OPTION(() => {
+        $.CONSUME(Assign)
+        const right = $.SUBRULE2($.expresionAsignacion)
+        left = { type: "Assign", left, right }
+      })
+      return left
     })
 
     $.RULE("comparacion", () => {
@@ -191,7 +213,6 @@ function App() {
         throw new Error(`Error léxico: ${resultadoLexico.errors[0].message}`)
       }
 
-      // Genera el AST para todo el programa
       parserInstance.input = resultadoLexico.tokens
       const astResult = parserInstance.programa()
 
@@ -199,72 +220,79 @@ function App() {
         throw new Error(`Error sintáctico: ${parserInstance.errors[0].message}`)
       }
 
-      // Evalúa el AST y almacena el resultado
       const evaluationResult = evaluate(astResult)
       setResult(evaluationResult.flat().filter(r => r !== undefined).join('\n'))
     } catch (error) {
-      // Muestra el error y detiene todo
       setResult(`Error: ${error.message}`)
     }
   }
 
-  const evaluate = (node) => {
+  const evaluate = (node, context = {}) => {
     if (typeof node === "number") return [];
     if (typeof node === "object" && node.image) return [];
 
     switch (node.type) {
       case "Program":
-        return node.body.flatMap(evaluate);
+        return node.body.flatMap(stmt => evaluate(stmt, context));
       case "ExpressionStatement":
-        return evaluate(node.expression);
+        return evaluate(node.expression, context);
       case "Block":
-        return node.body.flatMap(evaluate);
+        return node.body.flatMap(stmt => evaluate(stmt, context));
       case "If":
-        if (evaluateComparison(node.condition)) {
-          return evaluate(node.thenBlock);
+        if (evaluateExpression(node.condition, context)) {
+          return evaluate(node.thenBlock, context);
         } else if (node.elseBlock) {
-          return evaluate(node.elseBlock);
+          return evaluate(node.elseBlock, context);
         }
         return [];
-      case "Add":
-      case "Subtract":
-      case "Multiply":
-      case "Divide":
-      case "Comparison":
-        return []; // No imprimimos estos resultados
+      case "VariableDeclaration":
+        context[node.name] = evaluateExpression(node.initialValue, context);
+        return [];
       case "Pinta":
-        const value = evaluateExpression(node.expression);
+        const value = evaluateExpression(node.expression, context);
         return [`${value}`];
       default:
-        throw new Error(`Operación desconocida: ${node.type}`);
+        return [];
     }
-  };
+  }
 
-  const evaluateExpression = (node) => {
+  const evaluateExpression = (node, context) => {
     if (typeof node === "number") return node;
-    if (typeof node === "object" && node.image) return parseFloat(node.image);
+    if (typeof node === "object" && node.image) {
+      if (context.hasOwnProperty(node.image)) {
+        return context[node.image];
+      }
+      throw new Error(`Variable no definida: ${node.image}`);
+    }
 
     switch (node.type) {
       case "Add":
-        return evaluateExpression(node.left) + evaluateExpression(node.right);
+        return evaluateExpression(node.left, context) + evaluateExpression(node.right, context);
       case "Subtract":
-        return evaluateExpression(node.left) - evaluateExpression(node.right);
+        return evaluateExpression(node.left, context) - evaluateExpression(node.right, context);
       case "Multiply":
-        return evaluateExpression(node.left) * evaluateExpression(node.right);
+        return evaluateExpression(node.left, context) * evaluateExpression(node.right, context);
       case "Divide":
-        const divisor = evaluateExpression(node.right);
+        const divisor = evaluateExpression(node.right, context);
         if (divisor === 0) throw new Error("Error: División por cero");
-        return evaluateExpression(node.left) / divisor;
+        return evaluateExpression(node.left, context) / divisor;
       case "Comparison":
-        return evaluateComparison(node);
+        return evaluateComparison(node, context);
+      case "Assign":
+        if (node.left.type !== "Identifier") {
+          throw new Error("Solo se puede asignar a identificadores");
+        }
+        const value = evaluateExpression(node.right, context);
+        context[node.left.image] = value;
+        return value;
       default:
         throw new Error(`Operación desconocida: ${node.type}`);
     }
-  };
+  }
 
-  const evaluateComparison = (node) => {
-    const left = evaluateExpression(node.left);
-    const right = evaluateExpression(node.right);
+  const evaluateComparison = (node, context) => {
+    const left = evaluateExpression(node.left, context);
+    const right = evaluateExpression(node.right, context);
     switch (node.operator) {
       case "==":
         return left === right;

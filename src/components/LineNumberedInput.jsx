@@ -58,6 +58,7 @@ export default function LineNumberedInput({ code, setCode }) {
         className="flex-grow dark:bg-gray-700 p-2 outline-none resize-none overflow-hidden"
         rows={lines.length}
         style={{ minHeight: '100px' }}
+        spellCheck={false}
       />
     </div>
   )
