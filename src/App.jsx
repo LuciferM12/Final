@@ -6,7 +6,6 @@ import { Lexer, EmbeddedActionsParser, createToken } from 'chevrotain'
 const Pinta = createToken({ name: "Pinta", pattern: /pinta/ })
 const Let = createToken({ name: "Let", pattern: /let/ })
 const Identifier = createToken({ name: "Identifier", pattern: /[a-zA-Z]\w*/, longer_alt: Pinta })
-const While = createToken({ name: "While", pattern: /while/, longer_alt: Identifier });
 const Number = createToken({ name: "Number", pattern: /\d+(\.\d+)?/, line_breaks: true })
 const Plus = createToken({ name: "Plus", pattern: /\+/ })
 const Minus = createToken({ name: "Minus", pattern: /-/ })
@@ -14,9 +13,9 @@ const Multiply = createToken({ name: "Multiply", pattern: /\*/ })
 const Divide = createToken({ name: "Divide", pattern: /\// })
 const LParen = createToken({ name: "LParen", pattern: /\(/ })
 const RParen = createToken({ name: "RParen", pattern: /\)/ })
-const If = createToken({ name: "If", pattern: /IF/, longer_alt: Identifier })
-const Then = createToken({ name: "Then", pattern: /THEN/, longer_alt: Identifier })
-const Else = createToken({ name: "Else", pattern: /ELSE/, longer_alt: Identifier })
+const If = createToken({ name: "If", pattern: /if/, longer_alt: Identifier })
+const Then = createToken({ name: "Then", pattern: /then/, longer_alt: Identifier })
+const Else = createToken({ name: "Else", pattern: /else/, longer_alt: Identifier })
 const Equals = createToken({ name: "Equals", pattern: /==/ })
 const Assign = createToken({ name: "Assign", pattern: /=/ })
 const LessThan = createToken({ name: "LessThan", pattern: /</ })
@@ -24,7 +23,8 @@ const GreaterThan = createToken({ name: "GreaterThan", pattern: />/ })
 const LBrace = createToken({ name: "LBrace", pattern: /{/ })
 const RBrace = createToken({ name: "RBrace", pattern: /}/ })
 const Semicolon = createToken({ name: "Semicolon", pattern: /;/ })
-
+const While = createToken({ name: "While", pattern: /while/ })
+const Do = createToken({ name: "Do", pattern: /do/ })
 const WhiteSpace = createToken({
   name: "WhiteSpace",
   pattern: /\s+/,
@@ -33,8 +33,8 @@ const WhiteSpace = createToken({
 
 const tokens = [
   WhiteSpace, Number, Plus, Minus, Multiply, Divide, LParen, RParen,
-  If, Then, Else, Pinta, Let, While, Identifier, Equals, Assign, LessThan, GreaterThan,
-  LBrace, RBrace, Semicolon,
+  If, Then, Else, While, Do, Pinta, Let, Identifier, Equals, Assign, LessThan, GreaterThan,
+  LBrace, RBrace, Semicolon
 ]
 const lexer = new Lexer(tokens)
 
@@ -55,11 +55,19 @@ class CalcularParser extends EmbeddedActionsParser {
     $.RULE("statement", () => {
       return $.OR([
         { ALT: () => $.SUBRULE($.ifStatement) },
-        { ALT: () => $.SUBRULE($.whileStatement) },
         { ALT: () => $.SUBRULE($.expressionStatement) },
         { ALT: () => $.SUBRULE($.pintaStatement) },
-        { ALT: () => $.SUBRULE($.variableDeclaration) }
+        { ALT: () => $.SUBRULE($.variableDeclaration) },
+        { ALT: () => $.SUBRULE($.whileStatement) }
       ])
+    })
+
+    $.RULE("whileStatement", () => {
+      $.CONSUME(While)
+      const condition = $.SUBRULE($.comparacion)
+      $.CONSUME(Do)
+      const body = $.SUBRULE($.block)
+      return { type: "While", condition, body }
     })
 
     $.RULE("ifStatement", () => {
@@ -72,13 +80,6 @@ class CalcularParser extends EmbeddedActionsParser {
         return $.SUBRULE2($.block)
       })
       return { type: "If", condition, thenBlock, elseBlock }
-    })
-
-    $.RULE("whileStatement", () => {
-      $.CONSUME(While)
-      const condition = $.SUBRULE($.comparacion)
-      const body = $.SUBRULE($.block)
-      return { type: "While", condition, body }
     })
 
     $.RULE("block", () => {
@@ -188,7 +189,7 @@ class CalcularParser extends EmbeddedActionsParser {
           }
         },
         { ALT: () => $.SUBRULE($.expresionParentesis) },
-        { ALT: () => $.CONSUME(Identifier) },
+        { ALT: () => ({ type: "Identifier", name: $.CONSUME(Identifier).image }) },
       ])
     })
 
@@ -245,7 +246,8 @@ function App() {
       case "Program":
         return node.body.flatMap(stmt => evaluate(stmt, context));
       case "ExpressionStatement":
-        return evaluate(node.expression, context);
+        evaluateExpression(node.expression, context);
+        return [];
       case "Block":
         return node.body.flatMap(stmt => evaluate(stmt, context));
       case "If":
@@ -264,7 +266,7 @@ function App() {
       case "While":
         const results = [];
         let iterationCount = 0;
-        const maxIterations = 1000; 
+        const maxIterations = 1000;
         while (evaluateExpression(node.condition, context)) {
           results.push(...evaluate(node.body, context));
           iterationCount++;
@@ -280,12 +282,6 @@ function App() {
 
   const evaluateExpression = (node, context) => {
     if (typeof node === "number") return node;
-    if (typeof node === "object" && node.image) {
-      if (context.hasOwnProperty(node.image)) {
-        return context[node.image];
-      }
-      throw new Error(`Variable no definida: ${node.image}`);
-    }
 
     switch (node.type) {
       case "Add":
@@ -305,8 +301,13 @@ function App() {
           throw new Error("Solo se puede asignar a identificadores");
         }
         const value = evaluateExpression(node.right, context);
-        context[node.left.image] = value;
+        context[node.left.name] = value;
         return value;
+      case "Identifier":
+        if (context.hasOwnProperty(node.name)) {
+          return context[node.name];
+        }
+        throw new Error(`Variable no definida: ${node.name}`);
       default:
         throw new Error(`Operación desconocida: ${node.type}`);
     }
