@@ -5,8 +5,11 @@ import { Lexer, EmbeddedActionsParser, createToken } from 'chevrotain'
 
 const Pinta = createToken({ name: "Pinta", pattern: /pinta/ })
 const Let = createToken({ name: "Let", pattern: /let/ })
+const Fn = createToken({ name: "Fn", pattern: /fn/ })
+const Return = createToken({ name: "Return", pattern: /return/ })
 const Identifier = createToken({ name: "Identifier", pattern: /[a-zA-Z]\w*/, longer_alt: Pinta })
 const Number = createToken({ name: "Number", pattern: /\d+(\.\d+)?/, line_breaks: true })
+const String = createToken({ name: "String", pattern: /"(?:[^"\\]|\\.)*"/ })
 const Plus = createToken({ name: "Plus", pattern: /\+/ })
 const Minus = createToken({ name: "Minus", pattern: /-/ })
 const Multiply = createToken({ name: "Multiply", pattern: /\*/ })
@@ -23,6 +26,7 @@ const GreaterThan = createToken({ name: "GreaterThan", pattern: />/ })
 const LBrace = createToken({ name: "LBrace", pattern: /{/ })
 const RBrace = createToken({ name: "RBrace", pattern: /}/ })
 const Semicolon = createToken({ name: "Semicolon", pattern: /;/ })
+const Comma = createToken({ name: "Comma", pattern: /,/ })
 const While = createToken({ name: "While", pattern: /while/ })
 const Do = createToken({ name: "Do", pattern: /do/ })
 const WhiteSpace = createToken({
@@ -32,9 +36,9 @@ const WhiteSpace = createToken({
 })
 
 const tokens = [
-  WhiteSpace, Number, Plus, Minus, Multiply, Divide, LParen, RParen,
-  If, Then, Else, While, Do, Pinta, Let, Identifier, Equals, Assign, LessThan, GreaterThan,
-  LBrace, RBrace, Semicolon
+  WhiteSpace, Number, String, Plus, Minus, Multiply, Divide, LParen, RParen,
+  If, Then, Else, Pinta, Let, Fn,While, Do, Return, Identifier, Equals, Assign, LessThan, GreaterThan,
+  LBrace, RBrace, Semicolon, Comma, 
 ]
 const lexer = new Lexer(tokens)
 
@@ -55,11 +59,37 @@ class CalcularParser extends EmbeddedActionsParser {
     $.RULE("statement", () => {
       return $.OR([
         { ALT: () => $.SUBRULE($.ifStatement) },
+        { ALT: () => $.SUBRULE($.whileStatement) },
+        { ALT: () => $.SUBRULE($.functionDeclaration) },
+        { ALT: () => $.SUBRULE($.returnStatement) },
         { ALT: () => $.SUBRULE($.expressionStatement) },
         { ALT: () => $.SUBRULE($.pintaStatement) },
         { ALT: () => $.SUBRULE($.variableDeclaration) },
-        { ALT: () => $.SUBRULE($.whileStatement) }
       ])
+    })
+
+    $.RULE("functionDeclaration", () => {
+      $.CONSUME(Fn)
+      const name = $.CONSUME(Identifier).image
+      $.CONSUME(LParen)
+      const params = []
+      $.OPTION(() => {
+        params.push($.CONSUME2(Identifier).image)
+        $.MANY(() => {
+          $.CONSUME(Comma)
+          params.push($.CONSUME3(Identifier).image)
+        })
+      })
+      $.CONSUME(RParen)
+      const body = $.SUBRULE($.block)
+      return { type: "FunctionDeclaration", name, params, body }
+    })
+
+    $.RULE("returnStatement", () => {
+      $.CONSUME(Return)
+      const argument = $.SUBRULE($.expresion)
+      $.CONSUME(Semicolon)
+      return { type: "ReturnStatement", argument }
     })
 
     $.RULE("whileStatement", () => {
@@ -189,8 +219,25 @@ class CalcularParser extends EmbeddedActionsParser {
           }
         },
         { ALT: () => $.SUBRULE($.expresionParentesis) },
+        { ALT: () => $.SUBRULE($.callExpression) },
         { ALT: () => ({ type: "Identifier", name: $.CONSUME(Identifier).image }) },
+        { ALT: () => ({ type: "String", value: $.CONSUME(String).image.slice(1, -1) }) },
       ])
+    })
+
+    $.RULE("callExpression", () => {
+      const callee = $.CONSUME(Identifier)
+      $.CONSUME(LParen)
+      const args = []
+      $.OPTION(() => {
+        args.push($.SUBRULE($.expresion))
+        $.MANY(() => {
+          $.CONSUME(Comma)
+          args.push($.SUBRULE2($.expresion))
+        })
+      })
+      $.CONSUME(RParen)
+      return { type: "CallExpression", callee: callee.image, arguments: args }
     })
 
     $.RULE("expresionParentesis", () => {
@@ -238,84 +285,102 @@ function App() {
     }
   }
 
-  const evaluate = (node, context = {}) => {
-    if (typeof node === "number") return [];
-    if (typeof node === "object" && node.image) return [];
+  const evaluate = (node, context = { variables: {}, functions: {} }, localContext = null) => {
+    if (typeof node === "number") return [node];
+    if (typeof node === "object" && node.image) return [node.image];
+
+    const currentContext = localContext || context;
 
     switch (node.type) {
       case "Program":
         return node.body.flatMap(stmt => evaluate(stmt, context));
       case "ExpressionStatement":
-        evaluateExpression(node.expression, context);
-        return [];
+        return [evaluateExpression(node.expression, context, currentContext)];
       case "Block":
-        return node.body.flatMap(stmt => evaluate(stmt, context));
+        return node.body.flatMap(stmt => evaluate(stmt, context, currentContext));
       case "If":
-        if (evaluateExpression(node.condition, context)) {
-          return evaluate(node.thenBlock, context);
+        if (evaluateExpression(node.condition, context, currentContext)) {
+          return evaluate(node.thenBlock, context, currentContext);
         } else if (node.elseBlock) {
-          return evaluate(node.elseBlock, context);
+          return evaluate(node.elseBlock, context, currentContext);
         }
         return [];
-      case "VariableDeclaration":
-        context[node.name] = evaluateExpression(node.initialValue, context);
-        return [];
-      case "Pinta":
-        const value = evaluateExpression(node.expression, context);
-        return [`${value}`];
       case "While":
         const results = [];
         let iterationCount = 0;
-        const maxIterations = 1000;
-        while (evaluateExpression(node.condition, context)) {
-          results.push(...evaluate(node.body, context));
+        const maxIterations = 1000; 
+        while (evaluateExpression(node.condition, context, currentContext)) {
+          const iterationResults = evaluate(node.body, context, currentContext);
+          results.push(...iterationResults);
           iterationCount++;
           if (iterationCount > maxIterations) {
             throw new Error("Error: bucle infinito detectado.");
           }
         }
         return results;
-      default:
+      case "VariableDeclaration":
+        currentContext.variables[node.name] = evaluateExpression(node.initialValue, context, currentContext);
         return [];
+      case "FunctionDeclaration":
+        context.functions[node.name] = { params: node.params, body: node.body };
+        return [];
+      case "ReturnStatement":
+        return [evaluateExpression(node.argument, context, currentContext)];
+      case "Pinta":
+        const value = evaluateExpression(node.expression, context, currentContext);
+        return [`${value}`];
+      default:
+        return [evaluateExpression(node, context, currentContext)];
     }
   }
 
-  const evaluateExpression = (node, context) => {
+  const evaluateExpression = (node, context, localContext) => {
     if (typeof node === "number") return node;
 
     switch (node.type) {
       case "Add":
-        return evaluateExpression(node.left, context) + evaluateExpression(node.right, context);
+        return evaluateExpression(node.left, context, localContext) + evaluateExpression(node.right, context, localContext);
       case "Subtract":
-        return evaluateExpression(node.left, context) - evaluateExpression(node.right, context);
+        return evaluateExpression(node.left, context, localContext) - evaluateExpression(node.right, context, localContext);
       case "Multiply":
-        return evaluateExpression(node.left, context) * evaluateExpression(node.right, context);
+        return evaluateExpression(node.left, context, localContext) * evaluateExpression(node.right, context, localContext);
       case "Divide":
-        const divisor = evaluateExpression(node.right, context);
+        const divisor = evaluateExpression(node.right, context, localContext);
         if (divisor === 0) throw new Error("Error: División por cero");
-        return evaluateExpression(node.left, context) / divisor;
+        return evaluateExpression(node.left, context, localContext) / divisor;
       case "Comparison":
-        return evaluateComparison(node, context);
+        return evaluateComparison(node, context, localContext);
       case "Assign":
         if (node.left.type !== "Identifier") {
           throw new Error("Solo se puede asignar a identificadores");
         }
-        const value = evaluateExpression(node.right, context);
-        context[node.left.name] = value;
+        const value = evaluateExpression(node.right, context, localContext);
+        if (localContext.variables.hasOwnProperty(node.left.name)) {
+          localContext.variables[node.left.name] = value;
+        } else {
+          context.variables[node.left.name] = value;
+        }
         return value;
       case "Identifier":
-        if (context.hasOwnProperty(node.name)) {
-          return context[node.name];
+        if (localContext.variables.hasOwnProperty(node.name)) {
+          return localContext.variables[node.name];
+        }
+        if (context.variables.hasOwnProperty(node.name)) {
+          return context.variables[node.name];
         }
         throw new Error(`Variable no definida: ${node.name}`);
+      case "String":
+        return node.value;
+      case "CallExpression":
+        return evaluateCallExpression(node, context, localContext);
       default:
         throw new Error(`Operación desconocida: ${node.type}`);
     }
   }
 
-  const evaluateComparison = (node, context) => {
-    const left = evaluateExpression(node.left, context);
-    const right = evaluateExpression(node.right, context);
+  const evaluateComparison = (node, context, localContext) => {
+    const left = evaluateExpression(node.left, context, localContext);
+    const right = evaluateExpression(node.right, context, localContext);
     switch (node.operator) {
       case "==":
         return left === right;
@@ -326,6 +391,26 @@ function App() {
       default:
         throw new Error(`Operador de comparación desconocido: ${node.operator}`);
     }
+  }
+
+  const evaluateCallExpression = (node, context, localContext) => {
+    const func = context.functions[node.callee];
+    if (!func) {
+      throw new Error(`Función no definida: ${node.callee}`);
+    }
+    if (func.params.length !== node.arguments.length) {
+      throw new Error(`Número incorrecto de argumentos para la función ${node.callee}. Esperados: ${func.params.length}, Recibidos: ${node.arguments.length}`);
+    }
+    const args = node.arguments.map(arg => evaluateExpression(arg, context, localContext));
+    const functionLocalContext = {
+      variables: {},
+      functions: context.functions
+    };
+    func.params.forEach((param, index) => {
+      functionLocalContext.variables[param] = args[index];
+    });
+    const result = evaluate(func.body, context, functionLocalContext);
+    return result[result.length - 1];
   }
 
   return (
