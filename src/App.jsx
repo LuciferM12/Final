@@ -278,16 +278,29 @@ function App() {
         throw new Error(`Error sintáctico: ${parserInstance.errors[0].message}`)
       }
 
-      const { output } = evaluate(astResult)
-      setResult(output.join('\n'))
+      const { output } = evaluate(astResult);
+      console.log(output)
+      const mitad1 = output.slice(0, Math.ceil(output.length / 2))
+      const mitad2 = output.slice(Math.floor(output.length / 2))
+
+      // Comparar las dos mitades
+      const sonIguales = JSON.stringify(mitad1) === JSON.stringify(mitad2)
+
+      // Decidir qué enviar
+      const resultado = sonIguales ? setResult(mitad1.join('\n')) : setResult(context.output.join('\n'))
+      //setResult(output.join('\n'))
+      //console.log(resultado)
+      
+      //context.output = mitad;
+      
     } catch (error) {
       setResult(`Error: ${error.message}`)
     }
   }
 
-  const evaluate = (node, context = { variables: {}, functions: {} }, localContext = null) => {
+  const evaluate = (node, context = { variables: {}, functions: {}, output: [] }, localContext = null) => {
     const currentContext = localContext || context;
-    let output = [];
+    let returnValue;
 
     const evaluateNode = (node) => {
       if (typeof node === "number") return node;
@@ -296,23 +309,19 @@ function App() {
       switch (node.type) {
         case "Program":
           node.body.forEach(stmt => {
-            const result = evaluateNode(stmt);
-            if (result !== undefined && result !== null) {
-              output.push(result);
-            }
+            evaluateNode(stmt);
           });
           break;
         case "ExpressionStatement":
           return evaluateNode(node.expression);
         case "Block":
-          let blockReturnValue;
           node.body.forEach(stmt => {
             const result = evaluateNode(stmt);
             if (stmt.type === "ReturnStatement") {
-              blockReturnValue = result;
+              returnValue = result;
             }
           });
-          return blockReturnValue;
+          break;
         case "If":
           if (evaluateExpression(node.condition, context, currentContext)) {
             return evaluateNode(node.thenBlock);
@@ -324,11 +333,7 @@ function App() {
           let iterationCount = 0;
           const maxIterations = 1000;
           while (evaluateExpression(node.condition, context, currentContext)) {
-            const result = evaluateNode(node.body);
-            // Capture and push the result of each iteration to the output
-            if (result !== undefined && result !== null) {
-              output.push(result);
-            }
+            evaluateNode(node.body);
             iterationCount++;
             if (iterationCount > maxIterations) {
               throw new Error("Error: bucle infinito detectado.");
@@ -342,13 +347,13 @@ function App() {
           context.functions[node.name] = { params: node.params, body: node.body };
           break;
         case "ReturnStatement":
-          return evaluateExpression(node.argument, context, currentContext);
+          returnValue = evaluateExpression(node.argument, context, currentContext);
+          return returnValue;
         case "Pinta":
           const value = evaluateExpression(node.expression, context, currentContext);
-          console.log(output);
-          output.push(value);
-          break;
+          context.output.push(value);
 
+          break;
         case "CallExpression":
           return evaluateCallExpression(node, context, currentContext);
         default:
@@ -357,7 +362,8 @@ function App() {
     };
 
     evaluateNode(node);
-    return { output };
+    //console.log(context.output)
+    return { output: context.output, returnValue };
   }
 
   const evaluateExpression = (node, context, localContext) => {
@@ -430,13 +436,15 @@ function App() {
     const args = node.arguments.map(arg => evaluateExpression(arg, context, localContext));
     const functionLocalContext = {
       variables: {},
-      functions: context.functions
+      functions: context.functions,
+      output: []
     };
     func.params.forEach((param, index) => {
       functionLocalContext.variables[param] = args[index];
     });
-    const result = evaluate(func.body, context, functionLocalContext);
-    return result.output[result.output.length - 1];
+    const { output, returnValue } = evaluate(func.body, context, functionLocalContext);
+    context.output.push(...output);
+    return returnValue;
   };
 
   return (
