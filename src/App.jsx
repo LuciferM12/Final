@@ -20,7 +20,9 @@ const If = createToken({ name: "If", pattern: /if/, longer_alt: Identifier })
 const Then = createToken({ name: "Then", pattern: /then/, longer_alt: Identifier })
 const Else = createToken({ name: "Else", pattern: /else/, longer_alt: Identifier })
 const Equals = createToken({ name: "Equals", pattern: /==/ })
-const Assign = createToken({ name: "Assign", pattern: /=/ })
+const NotEquals = createToken({ name: "NotEquals", pattern: /!=/ })
+const LessThanOrEqual = createToken({ name: "LessThanOrEqual", pattern: /<=/ })
+const GreaterThanOrEqual = createToken({ name: "GreaterThanOrEqual", pattern: />=/ })
 const LessThan = createToken({ name: "LessThan", pattern: /</ })
 const GreaterThan = createToken({ name: "GreaterThan", pattern: />/ })
 const LBrace = createToken({ name: "LBrace", pattern: /{/ })
@@ -29,6 +31,7 @@ const Semicolon = createToken({ name: "Semicolon", pattern: /;/ })
 const Comma = createToken({ name: "Comma", pattern: /,/ })
 const While = createToken({ name: "While", pattern: /while/ })
 const Do = createToken({ name: "Do", pattern: /do/ })
+const Assign = createToken({ name: "Assign", pattern: /=/ })
 const WhiteSpace = createToken({
   name: "WhiteSpace",
   pattern: /\s+/,
@@ -37,8 +40,9 @@ const WhiteSpace = createToken({
 
 const tokens = [
   WhiteSpace, Number, String, Plus, Minus, Multiply, Divide, LParen, RParen,
-  If, Then, Else, Pinta, Let, Fn, While, Do, Return, Identifier, Equals, Assign, LessThan, GreaterThan,
-  LBrace, RBrace, Semicolon, Comma,
+  If, Then, Else, Pinta, Let, Fn, While, Do, Return, Identifier,
+  Equals, NotEquals, LessThanOrEqual, GreaterThanOrEqual, LessThan, GreaterThan,
+  Assign, LBrace, RBrace, Semicolon, Comma,
 ]
 const lexer = new Lexer(tokens)
 
@@ -175,6 +179,9 @@ class CalcularParser extends EmbeddedActionsParser {
       const left = $.SUBRULE($.expresionAdicion)
       const operator = $.OR([
         { ALT: () => $.CONSUME(Equals).image },
+        { ALT: () => $.CONSUME(NotEquals).image },
+        { ALT: () => $.CONSUME(LessThanOrEqual).image },
+        { ALT: () => $.CONSUME(GreaterThanOrEqual).image },
         { ALT: () => $.CONSUME(LessThan).image },
         { ALT: () => $.CONSUME(GreaterThan).image }
       ])
@@ -301,19 +308,22 @@ function App() {
 
       switch (node.type) {
         case "Program":
-          node.body.forEach(stmt => {
-            evaluateNode(stmt);
-          });
+          for (let stmt of node.body) {
+            const result = evaluateNode(stmt);
+            if (result && result.hasOwnProperty('returnValue')) {
+              return result;
+            }
+          }
           break;
         case "ExpressionStatement":
           return evaluateNode(node.expression);
         case "Block":
-          node.body.forEach(stmt => {
+          for (let stmt of node.body) {
             const result = evaluateNode(stmt);
-            if (stmt.type === "ReturnStatement") {
-              returnValue = result;
+            if (result && result.hasOwnProperty('returnValue')) {
+              return result;
             }
-          });
+          }
           break;
         case "If":
           if (evaluateExpression(node.condition, context, currentContext)) {
@@ -326,7 +336,10 @@ function App() {
           let iterationCount = 0;
           const maxIterations = 1000;
           while (evaluateExpression(node.condition, context, currentContext)) {
-            evaluateNode(node.body);
+            const result = evaluateNode(node.body);
+            if (result && result.hasOwnProperty('returnValue')) {
+              return result;
+            }
             iterationCount++;
             if (iterationCount > maxIterations) {
               throw new Error("Error: bucle infinito detectado.");
@@ -340,8 +353,7 @@ function App() {
           context.functions[node.name] = { params: node.params, body: node.body };
           break;
         case "ReturnStatement":
-          returnValue = evaluateExpression(node.argument, context, currentContext);
-          return returnValue;
+          return { returnValue: evaluateExpression(node.argument, context, currentContext) };
         case "Pinta":
           const value = evaluateExpression(node.expression, context, currentContext);
           context.print(value);
@@ -353,8 +365,8 @@ function App() {
       }
     };
 
-    evaluateNode(node);
-    return { returnValue };
+    const result = evaluateNode(node);
+    return result && result.hasOwnProperty('returnValue') ? result : { returnValue };
   }
 
   const evaluateExpression = (node, context, localContext) => {
@@ -407,10 +419,16 @@ function App() {
     switch (node.operator) {
       case "==":
         return left === right;
+      case "!=":
+        return left !== right;
       case "<":
         return left < right;
+      case "<=":
+        return left <= right;
       case ">":
         return left > right;
+      case ">=":
+        return left >= right;
       default:
         throw new Error(`Operador de comparación desconocido: ${node.operator}`);
     }
@@ -472,4 +490,3 @@ function App() {
 }
 
 export default App
-
