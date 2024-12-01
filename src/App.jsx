@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { FaSun, FaMoon } from "react-icons/fa6"
 import LineNumberedInput from './components/LineNumberedInput'
+import ASTVisualization from './components/ASTVisualization'
 import { Lexer, EmbeddedActionsParser, createToken } from 'chevrotain'
 
 const Pinta = createToken({ name: "Pinta", pattern: /pinta/ })
@@ -40,9 +41,9 @@ const WhiteSpace = createToken({
 
 const tokens = [
   WhiteSpace, Number, String, Plus, Minus, Multiply, Divide, LParen, RParen,
-  If, Then, Else, Pinta, Let, Fn, While, Do, Return, Identifier,
+  If, Then, Else, Pinta, Let, Fn, While, Do, Return, Identifier, 
   Equals, NotEquals, LessThanOrEqual, GreaterThanOrEqual, LessThan, GreaterThan,
-  Assign, LBrace, RBrace, Semicolon, Comma,
+  Assign, LBrace, RBrace, Semicolon, Comma, 
 ]
 const lexer = new Lexer(tokens)
 
@@ -264,6 +265,8 @@ function App() {
   const [darkMode, setDarkMode] = useState(true)
   const [code, setCode] = useState('')
   const [result, setResult] = useState('')
+  const [bytecode, setBytecode] = useState('')
+  const [ast, setAst] = useState(null)
 
   useEffect(() => {
     document.documentElement.classList.toggle('dark', darkMode)
@@ -271,6 +274,8 @@ function App() {
 
   const handleCompile = () => {
     setResult('')
+    setBytecode('')
+    setAst(null)
     try {
       const resultadoLexico = lexer.tokenize(code)
 
@@ -284,6 +289,11 @@ function App() {
       if (parserInstance.errors.length > 0) {
         throw new Error(`Error sintáctico: ${parserInstance.errors[0].message}`)
       }
+
+      setAst(astResult)
+
+      const bytecodeInstructions = generateBytecode(astResult);
+      setBytecode(bytecodeInstructions.join('\n'));
 
       const outputBuffer = [];
       const printFunction = (value) => {
@@ -455,35 +465,121 @@ function App() {
     return result.returnValue;
   };
 
+  const generateBytecode = (node) => {
+    const instructions = [];
+    
+    const generateForNode = (node) => {
+      switch (node.type) {
+        case "Program":
+          node.body.forEach(generateForNode);
+          break;
+        case "FunctionDeclaration":
+          instructions.push(`FUNCTION ${node.name}`);
+          node.params.forEach(param => instructions.push(`PARAM ${param}`));
+          generateForNode(node.body);
+          instructions.push('RETURN');
+          break;
+        case "Block":
+          node.body.forEach(generateForNode);
+          break;
+        case "VariableDeclaration":
+          instructions.push(`STORE ${node.name}`);
+          break;
+        case "Pinta":
+          instructions.push('CALL pinta');
+          break;
+        case "If":
+          generateForNode(node.condition);
+          instructions.push('JUMP_IF_FALSE else');
+          generateForNode(node.thenBlock);
+          instructions.push('JUMP end');
+          instructions.push('LABEL else');
+          if (node.elseBlock) {
+            generateForNode(node.elseBlock);
+          }
+          instructions.push('LABEL end');
+          break;
+        case "While":
+          instructions.push('LABEL loop_start');
+          generateForNode(node.condition);
+          instructions.push('JUMP_IF_FALSE loop_end');
+          generateForNode(node.body);
+          instructions.push('JUMP loop_start');
+          instructions.push('LABEL loop_end');
+          break;
+        case "Comparison":
+          generateForNode(node.left);
+          generateForNode(node.right);
+          instructions.push(`COMPARE ${node.operator}`);
+          break;
+        case "CallExpression":
+          node.arguments.forEach(generateForNode);
+          instructions.push(`CALL ${node.callee}`);
+          break;
+        case "ReturnStatement":
+          generateForNode(node.argument);
+          instructions.push('RETURN');
+          break;
+        case "Identifier":
+          instructions.push(`LOAD ${node.name}`);
+          break;
+        case "String":
+        case "Number":
+          instructions.push(`PUSH ${node.value}`);
+          break;
+      }
+    };
+
+    generateForNode(node);
+    return instructions;
+  };
+
   return (
-    <div className={`${darkMode ? 'dark' : ''} h-screen w-screen dark:bg-gray-900 dark:text-white box-border overflow-hidden`}>
-      <button onClick={() => setDarkMode(!darkMode)} className='text-3xl absolute top-2 right-2'>
+    <div className={`${darkMode ? 'dark' : ''} min-h-screen w-full dark:bg-gray-900 dark:text-white box-border`}>
+      <button onClick={() => setDarkMode(!darkMode)} className='text-3xl fixed top-4 right-4 z-10'>
         {
           !darkMode ?
             <FaMoon className='text-gray-900' /> :
             <FaSun className='text-yellow-300' />
         }
       </button>
-      <div className='h-full w-full justify-center items-center flex flex-col gap-2'>
+      <div className='container mx-auto px-4 py-8 flex flex-col gap-4'>
         <h1 className='text-2xl font-bold'>Compilador en línea</h1>
-        <div className='w-full px-12 py-4'>
+        <div className='w-full'>
           <LineNumberedInput setCode={setCode} code={code} />
         </div>
-        <div className='w-full px-12'>
-          <h2 className='pb-3'>Consola</h2>
-          <div className='border-gray-950 dark:border-gray-300 border rounded-md h-48 mb-3 overflow-y-scroll'>
-            <ul className='p-3'>
-              {result.split("\n").map((line, index) => (
-                <li key={index} className='text-sm'>
-                  {line}
-                </li>
-              ))}
-            </ul>
+        <div className='w-full flex flex-wrap gap-4'>
+          <div className='w-full lg:w-[calc(50%-0.5rem)]'>
+            <h2 className='pb-3'>Consola</h2>
+            <div className='border-gray-950 dark:border-gray-300 border rounded-md h-48 overflow-y-auto'>
+              <ul className='p-3'>
+                {result.split("\n").map((line, index) => (
+                  <li key={index} className='text-sm'>
+                    {line}
+                  </li>
+                ))}
+              </ul>
+            </div>
           </div>
-        </div>
-        <button onClick={handleCompile} className='p-2 cursor-pointer bg-slate-500 rounded'>
+          <button onClick={handleCompile} className='p-2 cursor-pointer bg-blue-500 hover:bg-blue-600 text-white font-bold rounded transition-colors'>
           Compilar
         </button>
+          <div className='w-full lg:w-[calc(50%-0.5rem)]'>
+            <h2 className='pb-3'>Bytecode</h2>
+            <div className='border-gray-950 dark:border-gray-300 border rounded-md h-48 overflow-y-auto'>
+              <pre className='p-3 text-sm'>
+                {bytecode}
+              </pre>
+            </div>
+          </div>
+          <div className='w-full'>
+            <h2 className='pb-3'>AST Visualization</h2>
+            <div className='border-gray-950 dark:border-gray-300 border rounded-md h-[600px] overflow-auto'>
+              {ast && <ASTVisualization ast={ast} />}
+            </div>
+          </div>
+        </div>
+       
       </div>
     </div>
   )
