@@ -37,8 +37,8 @@ const WhiteSpace = createToken({
 
 const tokens = [
   WhiteSpace, Number, String, Plus, Minus, Multiply, Divide, LParen, RParen,
-  If, Then, Else, Pinta, Let, Fn,While, Do, Return, Identifier, Equals, Assign, LessThan, GreaterThan,
-  LBrace, RBrace, Semicolon, Comma, 
+  If, Then, Else, Pinta, Let, Fn, While, Do, Return, Identifier, Equals, Assign, LessThan, GreaterThan,
+  LBrace, RBrace, Semicolon, Comma,
 ]
 const lexer = new Lexer(tokens)
 
@@ -278,60 +278,86 @@ function App() {
         throw new Error(`Error sintáctico: ${parserInstance.errors[0].message}`)
       }
 
-      const evaluationResult = evaluate(astResult)
-      setResult(evaluationResult.flat().filter(r => r !== undefined).join('\n'))
+      const { output } = evaluate(astResult)
+      setResult(output.join('\n'))
     } catch (error) {
       setResult(`Error: ${error.message}`)
     }
   }
 
   const evaluate = (node, context = { variables: {}, functions: {} }, localContext = null) => {
-    if (typeof node === "number") return [node];
-    if (typeof node === "object" && node.image) return [node.image];
-
     const currentContext = localContext || context;
+    let output = [];
 
-    switch (node.type) {
-      case "Program":
-        return node.body.flatMap(stmt => evaluate(stmt, context));
-      case "ExpressionStatement":
-        return [evaluateExpression(node.expression, context, currentContext)];
-      case "Block":
-        return node.body.flatMap(stmt => evaluate(stmt, context, currentContext));
-      case "If":
-        if (evaluateExpression(node.condition, context, currentContext)) {
-          return evaluate(node.thenBlock, context, currentContext);
-        } else if (node.elseBlock) {
-          return evaluate(node.elseBlock, context, currentContext);
-        }
-        return [];
-      case "While":
-        const results = [];
-        let iterationCount = 0;
-        const maxIterations = 1000; 
-        while (evaluateExpression(node.condition, context, currentContext)) {
-          const iterationResults = evaluate(node.body, context, currentContext);
-          results.push(...iterationResults);
-          iterationCount++;
-          if (iterationCount > maxIterations) {
-            throw new Error("Error: bucle infinito detectado.");
+    const evaluateNode = (node) => {
+      if (typeof node === "number") return node;
+      if (typeof node === "object" && node.image) return node.image;
+
+      switch (node.type) {
+        case "Program":
+          node.body.forEach(stmt => {
+            const result = evaluateNode(stmt);
+            if (result !== undefined && result !== null) {
+              output.push(result);
+            }
+          });
+          break;
+        case "ExpressionStatement":
+          return evaluateNode(node.expression);
+        case "Block":
+          let blockReturnValue;
+          node.body.forEach(stmt => {
+            const result = evaluateNode(stmt);
+            if (stmt.type === "ReturnStatement") {
+              blockReturnValue = result;
+            }
+          });
+          return blockReturnValue;
+        case "If":
+          if (evaluateExpression(node.condition, context, currentContext)) {
+            return evaluateNode(node.thenBlock);
+          } else if (node.elseBlock) {
+            return evaluateNode(node.elseBlock);
           }
-        }
-        return results;
-      case "VariableDeclaration":
-        currentContext.variables[node.name] = evaluateExpression(node.initialValue, context, currentContext);
-        return [];
-      case "FunctionDeclaration":
-        context.functions[node.name] = { params: node.params, body: node.body };
-        return [];
-      case "ReturnStatement":
-        return [evaluateExpression(node.argument, context, currentContext)];
-      case "Pinta":
-        const value = evaluateExpression(node.expression, context, currentContext);
-        return [`${value}`];
-      default:
-        return [evaluateExpression(node, context, currentContext)];
-    }
+          break;
+        case "While":
+          let iterationCount = 0;
+          const maxIterations = 1000;
+          while (evaluateExpression(node.condition, context, currentContext)) {
+            const result = evaluateNode(node.body);
+            // Capture and push the result of each iteration to the output
+            if (result !== undefined && result !== null) {
+              output.push(result);
+            }
+            iterationCount++;
+            if (iterationCount > maxIterations) {
+              throw new Error("Error: bucle infinito detectado.");
+            }
+          }
+          break;
+        case "VariableDeclaration":
+          currentContext.variables[node.name] = evaluateExpression(node.initialValue, context, currentContext);
+          break;
+        case "FunctionDeclaration":
+          context.functions[node.name] = { params: node.params, body: node.body };
+          break;
+        case "ReturnStatement":
+          return evaluateExpression(node.argument, context, currentContext);
+        case "Pinta":
+          const value = evaluateExpression(node.expression, context, currentContext);
+          console.log(output);
+          output.push(value);
+          break;
+
+        case "CallExpression":
+          return evaluateCallExpression(node, context, currentContext);
+        default:
+          return evaluateExpression(node, context, currentContext);
+      }
+    };
+
+    evaluateNode(node);
+    return { output };
   }
 
   const evaluateExpression = (node, context, localContext) => {
@@ -410,8 +436,8 @@ function App() {
       functionLocalContext.variables[param] = args[index];
     });
     const result = evaluate(func.body, context, functionLocalContext);
-    return result[result.length - 1];
-  }
+    return result.output[result.output.length - 1];
+  };
 
   return (
     <div className={`${darkMode ? 'dark' : ''} h-screen w-screen dark:bg-gray-900 dark:text-white box-border overflow-hidden`}>
@@ -448,3 +474,4 @@ function App() {
 }
 
 export default App
+
