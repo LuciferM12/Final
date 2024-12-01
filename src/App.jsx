@@ -278,46 +278,22 @@ function App() {
         throw new Error(`Error sintáctico: ${parserInstance.errors[0].message}`)
       }
 
-      const { output } = evaluate(astResult);
-      console.log(output)
-      setResult(output.join('\n'))
+      const outputBuffer = [];
+      const printFunction = (value) => {
+        outputBuffer.push(value);
+        setResult(prev => prev + (prev ? '\n' : '') + value);
+      };
+
+      evaluate(astResult, { variables: {}, functions: {}, print: printFunction });
 
     } catch (error) {
       setResult(`Error: ${error.message}`)
     }
   }
 
-
-
-  const evaluate = (node, context = { variables: {}, functions: {}, output: [] }, localContext = null) => {
+  const evaluate = (node, context = { variables: {}, functions: {}, print: console.log }, localContext = null) => {
     const currentContext = localContext || context;
     let returnValue;
-    let functionOutput = [];
-    let isInFunction = false;
-
-    const evaluateCallExpression = (node, context, localContext) => {
-      const func = context.functions[node.callee];
-      if (!func) {
-        throw new Error(`Función no definida: ${node.callee}`);
-      }
-      if (func.params.length !== node.arguments.length) {
-        throw new Error(`Número incorrecto de argumentos para la función ${node.callee}. Esperados: ${func.params.length}, Recibidos: ${node.arguments.length}`);
-      }
-      const args = node.arguments.map(arg => evaluateExpression(arg, context, localContext));
-      const functionLocalContext = {
-        variables: {},
-        functions: context.functions,
-        output: []
-      };
-      func.params.forEach((param, index) => {
-        functionLocalContext.variables[param] = args[index];
-      });
-      const prevIsInFunction = isInFunction;
-      isInFunction = true;
-      const result = evaluate(func.body, context, functionLocalContext);
-      isInFunction = prevIsInFunction;
-      return result;
-    };
 
     const evaluateNode = (node) => {
       if (typeof node === "number") return node;
@@ -368,91 +344,98 @@ function App() {
           return returnValue;
         case "Pinta":
           const value = evaluateExpression(node.expression, context, currentContext);
-          if (isInFunction) {
-            functionOutput.push(value);
-          } else {
-            context.output.push(value);
-          }
+          context.print(value);
           break;
         case "CallExpression":
-          const result = evaluateCallExpression(node, context, currentContext);
-          if (isInFunction) {
-            functionOutput.push(...result.output);
-          } else {
-            context.output.push(...result.output);
-          }
-          return result.returnValue;
+          return evaluateCallExpression(node, context, currentContext);
         default:
           return evaluateExpression(node, context, currentContext);
       }
     };
 
-    const evaluateExpression = (node, context, localContext) => {
-      if (typeof node === "number") return node;
-
-      switch (node.type) {
-        case "Add":
-          return evaluateExpression(node.left, context, localContext) + evaluateExpression(node.right, context, localContext);
-        case "Subtract":
-          return evaluateExpression(node.left, context, localContext) - evaluateExpression(node.right, context, localContext);
-        case "Multiply":
-          return evaluateExpression(node.left, context, localContext) * evaluateExpression(node.right, context, localContext);
-        case "Divide":
-          const divisor = evaluateExpression(node.right, context, localContext);
-          if (divisor === 0) throw new Error("Error: División por cero");
-          return evaluateExpression(node.left, context, localContext) / divisor;
-        case "Comparison":
-          return evaluateComparison(node, context, localContext);
-        case "Assign":
-          if (node.left.type !== "Identifier") {
-            throw new Error("Solo se puede asignar a identificadores");
-          }
-          const value = evaluateExpression(node.right, context, localContext);
-          if (localContext.variables.hasOwnProperty(node.left.name)) {
-            localContext.variables[node.left.name] = value;
-          } else {
-            context.variables[node.left.name] = value;
-          }
-          return value;
-        case "Identifier":
-          if (localContext.variables.hasOwnProperty(node.name)) {
-            return localContext.variables[node.name];
-          }
-          if (context.variables.hasOwnProperty(node.name)) {
-            return context.variables[node.name];
-          }
-          throw new Error(`Variable no definida: ${node.name}`);
-        case "String":
-          return node.value;
-        case "CallExpression":
-          const result = evaluateCallExpression(node, context, localContext);
-          return result.returnValue;
-        default:
-          throw new Error(`Operación desconocida: ${node.type}`);
-      }
-    }
-
-    const evaluateComparison = (node, context, localContext) => {
-      const left = evaluateExpression(node.left, context, localContext);
-      const right = evaluateExpression(node.right, context, localContext);
-      switch (node.operator) {
-        case "==":
-          return left === right;
-        case "<":
-          return left < right;
-        case ">":
-          return left > right;
-        default:
-          throw new Error(`Operador de comparación desconocido: ${node.operator}`);
-      }
-    }
-
     evaluateNode(node);
-
-    return { output: isInFunction ? functionOutput : context.output, returnValue };
+    return { returnValue };
   }
 
+  const evaluateExpression = (node, context, localContext) => {
+    if (typeof node === "number") return node;
 
+    switch (node.type) {
+      case "Add":
+        return evaluateExpression(node.left, context, localContext) + evaluateExpression(node.right, context, localContext);
+      case "Subtract":
+        return evaluateExpression(node.left, context, localContext) - evaluateExpression(node.right, context, localContext);
+      case "Multiply":
+        return evaluateExpression(node.left, context, localContext) * evaluateExpression(node.right, context, localContext);
+      case "Divide":
+        const divisor = evaluateExpression(node.right, context, localContext);
+        if (divisor === 0) throw new Error("Error: División por cero");
+        return evaluateExpression(node.left, context, localContext) / divisor;
+      case "Comparison":
+        return evaluateComparison(node, context, localContext);
+      case "Assign":
+        if (node.left.type !== "Identifier") {
+          throw new Error("Solo se puede asignar a identificadores");
+        }
+        const value = evaluateExpression(node.right, context, localContext);
+        if (localContext.variables.hasOwnProperty(node.left.name)) {
+          localContext.variables[node.left.name] = value;
+        } else {
+          context.variables[node.left.name] = value;
+        }
+        return value;
+      case "Identifier":
+        if (localContext.variables.hasOwnProperty(node.name)) {
+          return localContext.variables[node.name];
+        }
+        if (context.variables.hasOwnProperty(node.name)) {
+          return context.variables[node.name];
+        }
+        throw new Error(`Variable no definida: ${node.name}`);
+      case "String":
+        return node.value;
+      case "CallExpression":
+        return evaluateCallExpression(node, context, localContext);
+      default:
+        throw new Error(`Operación desconocida: ${node.type}`);
+    }
+  }
+
+  const evaluateComparison = (node, context, localContext) => {
+    const left = evaluateExpression(node.left, context, localContext);
+    const right = evaluateExpression(node.right, context, localContext);
+    switch (node.operator) {
+      case "==":
+        return left === right;
+      case "<":
+        return left < right;
+      case ">":
+        return left > right;
+      default:
+        throw new Error(`Operador de comparación desconocido: ${node.operator}`);
+    }
+  }
+
+  const evaluateCallExpression = (node, context, localContext) => {
+    const func = context.functions[node.callee];
+    if (!func) {
+      throw new Error(`Función no definida: ${node.callee}`);
+    }
+    if (func.params.length !== node.arguments.length) {
+      throw new Error(`Número incorrecto de argumentos para la función ${node.callee}. Esperados: ${func.params.length}, Recibidos: ${node.arguments.length}`);
+    }
+    const args = node.arguments.map(arg => evaluateExpression(arg, context, localContext));
+    const functionLocalContext = {
+      variables: {},
+      functions: context.functions,
+      print: context.print
+    };
+    func.params.forEach((param, index) => {
+      functionLocalContext.variables[param] = args[index];
+    });
+    const result = evaluate(func.body, context, functionLocalContext);
+    return result.returnValue;
+  };
 
   return (
     <div className={`${darkMode ? 'dark' : ''} h-screen w-screen dark:bg-gray-900 dark:text-white box-border overflow-hidden`}>
