@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react'
 import { FaSun, FaMoon } from "react-icons/fa6"
-import { FaAngleRight, FaAngleDown, FaFolderOpen, FaPlay, FaSave } from "react-icons/fa"
+import { FaAngleRight, FaAngleDown, FaFolderOpen, FaPlay, FaSave, FaDownload } from "react-icons/fa"
 import { VscNewFile } from "react-icons/vsc"
 import LineNumberedInput from './components/LineNumberedInput'
 import ASTVisualization from './components/ASTVisualization'
@@ -347,6 +347,18 @@ function App() {
     URL.revokeObjectURL(url)
   }
 
+  const handleBytecodeDownload = () => {
+    const blob = new Blob([bytecode], { type: 'text/plain' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = 'bytecode.txt'
+    document.body.appendChild(a)
+    a.click()
+    document.body.removeChild(a)
+    URL.revokeObjectURL(url)
+  }
+
   const evaluate = (node, context = { variables: {}, functions: {}, print: console.log }, localContext = null) => {
     const currentContext = localContext || context;
     let returnValue;
@@ -622,13 +634,23 @@ function App() {
             </div>
           </div>
           <div className='w-full '>
-            <h2 className='pb-3 flex gap-1 items-center' >
-              {
-                isVisibleBytCode ?
-                  <FaAngleDown className='cursor-pointer' onClick={() => setIsVisibleBytCode(!isVisibleBytCode)} /> :
-                  <FaAngleRight className='cursor-pointer' onClick={() => setIsVisibleBytCode(!isVisibleBytCode)} />
-              }
-              Bytecode
+            <h2 className='pb-3 flex gap-1 items-center justify-between' >
+              <div className='flex items-center gap-1'>
+                {
+                  isVisibleBytCode ?
+                    <FaAngleDown className='cursor-pointer' onClick={() => setIsVisibleBytCode(!isVisibleBytCode)} /> :
+                    <FaAngleRight className='cursor-pointer' onClick={() => setIsVisibleBytCode(!isVisibleBytCode)} />
+                }
+                Bytecode
+              </div>
+              {bytecode && (
+                <button
+                  onClick={handleBytecodeDownload}
+                  className='text-black dark:text-white text-sm flex items-center gap-1 p-1 border rounded'
+                >
+                  <FaDownload /> Descargar
+                </button>
+              )}
             </h2>
             {
               isVisibleBytCode &&
